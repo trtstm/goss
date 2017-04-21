@@ -2,16 +2,16 @@ package main
 
 import (
 	"fmt"
-	"log"
+	"math"
 	"runtime"
 	"time"
 	"unsafe"
 
-	"net/http"
-	_ "net/http/pprof"
+	//	_ "net/http/pprof"
 
 	gl "github.com/go-gl/gl/v3.1/gles2"
 	"github.com/go-gl/glfw/v3.2/glfw"
+	"github.com/trtstm/goss/ships"
 )
 
 func init() {
@@ -82,6 +82,7 @@ void main()
 `
 
 var mapVao uint32
+var mapVbo uint32
 var mapProgram uint32
 var nMapVertecies uint32
 var mapPosAttribute int32
@@ -101,10 +102,58 @@ func fromGLString(p *uint8) string {
 	return string(buffer)
 }
 
-var x uint = 249
-var y uint = 265
-
 var lvl *Level
+
+var ship ships.Ship
+
+func generateMap() {
+	hShift := (ship.Position.X() - float32(math.Floor(float64(ship.Position.X())))) * 16.0
+
+	// Fill vbo.
+	data := []float32{}
+	leftMostTile := uint(ship.Position.X()) - (config.Screen.ResX/16)/2
+	rightMostTile := uint(ship.Position.X()) + (config.Screen.ResX/16)/2
+	topMostTile := uint(ship.Position.Y()) - (config.Screen.ResY/16)/2
+	bottomMostTile := uint(ship.Position.Y()) + (config.Screen.ResY/16)/2
+	for y := topMostTile; y < bottomMostTile; y++ {
+		for x := leftMostTile; x < rightMostTile+1; x++ {
+			tile := lvl.Tile(x, y)
+			if tile == 0 {
+				continue
+			}
+
+			tx, ty := lvl.Texel(tile)
+
+			data = append(data,
+				float32((x-leftMostTile)*16)+hShift, float32((y-topMostTile)*16),
+				tx, ty,
+
+				float32((x+1-leftMostTile)*16)+hShift, float32((y-topMostTile)*16),
+				tx+16.0/306.0, ty,
+
+				float32((x+1-leftMostTile)*16)+hShift, float32((y+1-topMostTile)*16),
+				tx+16.0/306.0, ty+16.0/160.0,
+			)
+
+			data = append(data,
+				float32((x+1-leftMostTile)*16)+hShift, float32((y+1-topMostTile)*16),
+				tx+16.0/306.0, ty+16.0/160.0,
+
+				float32((x-leftMostTile)*16)+hShift, float32((y+1-topMostTile)*16),
+				tx, ty+16.0/160.0,
+
+				float32((x-leftMostTile)*16)+hShift, float32((y-topMostTile)*16),
+				tx, ty,
+			)
+
+			//data = append(data, -1, -1, 1, -1, 1, 1, 1, 1, -1, 1, -1, -1)
+		}
+	}
+
+	nMapVertecies = uint32(len(data))
+
+	gl.BufferData(gl.ARRAY_BUFFER, len(data)*4, unsafe.Pointer(&data[0]), gl.DYNAMIC_DRAW)
+}
 
 func InitializeMap() {
 	var err error
@@ -117,57 +166,8 @@ func InitializeMap() {
 	gl.BindVertexArray(mapVao)
 	defer gl.BindVertexArray(0)
 
-	var mapVbo uint32
 	gl.GenBuffers(1, &mapVbo)
-
-	fmt.Println(lvl.Texel(2))
-
-	// Fill vbo.
-	data := []float32{}
-	leftMostTile := x - (config.Screen.ResX/16)/2
-	rightMostTile := x + (config.Screen.ResX/16)/2
-	topMostTile := y - (config.Screen.ResY/16)/2
-	bottomMostTile := y + (config.Screen.ResY/16)/2
-	for y := topMostTile; y < bottomMostTile; y++ {
-		for x := leftMostTile; x < rightMostTile+1; x++ {
-			tile := lvl.Tile(x, y)
-			if tile == 0 {
-				continue
-			}
-
-			tx, ty := lvl.Texel(tile)
-
-			data = append(data,
-				float32((x-leftMostTile)*16), float32((y-topMostTile)*16),
-				tx, ty,
-
-				float32((x+1-leftMostTile)*16), float32((y-topMostTile)*16),
-				tx+16.0/306.0, ty,
-
-				float32((x+1-leftMostTile)*16), float32((y+1-topMostTile)*16),
-				tx+16.0/306.0, ty+16.0/160.0,
-			)
-
-			data = append(data,
-				float32((x+1-leftMostTile)*16), float32((y+1-topMostTile)*16),
-				tx+16.0/306.0, ty+16.0/160.0,
-
-				float32((x-leftMostTile)*16), float32((y+1-topMostTile)*16),
-				tx, ty+16.0/160.0,
-
-				float32((x-leftMostTile)*16), float32((y-topMostTile)*16),
-				tx, ty,
-			)
-
-			//data = append(data, -1, -1, 1, -1, 1, 1, 1, 1, -1, 1, -1, -1)
-		}
-	}
-
-	nMapVertecies = uint32(len(data))
-
 	gl.BindBuffer(gl.ARRAY_BUFFER, mapVbo)
-	defer gl.BindBuffer(gl.ARRAY_BUFFER, 0)
-	gl.BufferData(gl.ARRAY_BUFFER, len(data)*4, unsafe.Pointer(&data[0]), gl.STATIC_DRAW)
 
 	//gl.VertexAttribPointer(1, 2, gl.FLOAT, false, 20, unsafe.Pointer(uintptr(8)))
 	//gl.EnableVertexAttribArray(1)
@@ -236,9 +236,9 @@ func init() {
 }
 
 func main() {
-	go func() {
+	/*go func() {
 		log.Println(http.ListenAndServe("localhost:6060", nil))
-	}()
+	}()*/
 
 	err := glfw.Init()
 	if err != nil {
@@ -262,6 +262,9 @@ func main() {
 		panic(err)
 	}
 
+	ship.Position[0] = 285.0
+	ship.Position[1] = 265.0
+
 	InitializeMap()
 
 	cur := time.Now()
@@ -275,6 +278,24 @@ func main() {
 		gl.Clear(gl.COLOR_BUFFER_BIT)
 
 		mouseX, mouseY := window.GetCursorPos()
+
+		if window.GetKey(glfw.KeyD) == glfw.Press {
+			ship.Position[0] += float32(dt) * 16.0
+		}
+
+		if window.GetKey(glfw.KeyA) == glfw.Press {
+			ship.Position[0] -= float32(dt) * 16.0
+		}
+
+		if window.GetKey(glfw.KeyW) == glfw.Press {
+			ship.Position[1] -= float32(dt) * 16.0
+		}
+
+		if window.GetKey(glfw.KeyS) == glfw.Press {
+			ship.Position[1] += float32(dt) * 16.0
+		}
+
+		generateMap()
 		RenderMap(start, mouseX, mouseY)
 
 		// Do OpenGL stuff.
